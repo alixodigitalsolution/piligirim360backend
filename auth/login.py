@@ -239,6 +239,70 @@ class PilgrimRegisterRequest(BaseModel):
     phone: str | None = None
 
 
+@router.get("/me")
+def get_current_user_profile(user=Depends(get_current_user)):
+    """
+    Returns full user profile for the currently authenticated user.
+    For pilgrims, also returns their leader's name and phone number.
+    """
+    user_id = user["sub"]
+    try:
+        res = supabase.table("users_table") \
+            .select("id, email, full_name, role, agency_id, leader_id, phone, journey_type") \
+            .eq("id", user_id) \
+            .limit(1) \
+            .execute()
+
+        if not res.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        profile = res.data[0]
+
+        # For pilgrims, fetch leader info
+        if profile.get("leader_id"):
+            try:
+                leader_res = supabase.table("users_table") \
+                    .select("full_name, phone") \
+                    .eq("id", profile["leader_id"]) \
+                    .limit(1) \
+                    .execute()
+                if leader_res.data:
+                    profile["leader_name"] = leader_res.data[0].get("full_name", "")
+                    profile["leader_phone"] = leader_res.data[0].get("phone", "")
+                else:
+                    profile["leader_name"] = None
+                    profile["leader_phone"] = None
+            except Exception:
+                profile["leader_name"] = None
+                profile["leader_phone"] = None
+        else:
+            profile["leader_name"] = None
+            profile["leader_phone"] = None
+
+        # Fetch agency name
+        if profile.get("agency_id"):
+            try:
+                agency_res = supabase.table("agencies") \
+                    .select("name") \
+                    .eq("id", profile["agency_id"]) \
+                    .limit(1) \
+                    .execute()
+                if agency_res.data:
+                    profile["agency_name"] = agency_res.data[0].get("name", "")
+                else:
+                    profile["agency_name"] = None
+            except Exception:
+                profile["agency_name"] = None
+        else:
+            profile["agency_name"] = None
+
+        return {"success": True, "data": profile}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/register-pilgrim")
 def register_pilgrim(body: PilgrimRegisterRequest):
     email = body.email.strip().lower()
