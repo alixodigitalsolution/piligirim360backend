@@ -69,6 +69,8 @@ def get_group_locations(
             if group_names:
                 pilgrims_res = supabase.table("pilgrim_groups").select("pilgrim_id").in_("group_name", group_names).execute()
                 pilgrim_ids = [p["pilgrim_id"] for p in (pilgrims_res.data or []) if p.get("pilgrim_id")]
+                # Add leader's own ID so they show up on the map too!
+                pilgrim_ids.append(user["sub"])
                 if pilgrim_ids:
                     res = supabase.table("pilgrim_locations") \
                         .select("pilgrim_id, latitude, longitude, battery_level, is_online, recorded_at") \
@@ -105,11 +107,14 @@ def get_group_locations(
                 u = _select_user_profile(loc["pilgrim_id"])
                 name = u.data[0]["full_name"] if u.data else "Unknown"
                 phone = u.data[0].get("phone", "") if u.data else ""
+                role = u.data[0].get("role", "pilgrim") if u.data else "pilgrim"
             except Exception:
                 name = "Pilgrim"
                 phone = ""
+                role = "pilgrim"
             loc["full_name"] = name
             loc["phone"] = phone
+            loc["role"] = role
             enriched.append(loc)
 
         return {"success": True, "data": enriched, "count": len(enriched)}
@@ -340,10 +345,10 @@ def _is_missing_phone_error(exc: Exception) -> bool:
 
 def _select_user_profile(user_id: str):
     try:
-        return supabase.table("users_table").select("full_name, phone").eq("id", user_id).limit(1).execute()
+        return supabase.table("users_table").select("full_name, phone, role").eq("id", user_id).limit(1).execute()
     except Exception as e:
         if _is_missing_phone_error(e):
-            return supabase.table("users_table").select("full_name").eq("id", user_id).limit(1).execute()
+            return supabase.table("users_table").select("full_name, role").eq("id", user_id).limit(1).execute()
         raise
 
 

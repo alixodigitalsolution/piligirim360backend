@@ -107,3 +107,118 @@ def clear_meeting_point(group_id: str, authorization: str = Header(None)):
         return {"success": True, "message": "Meeting point cleared"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class SetNextRequest(BaseModel):
+    group_id: str
+    pin_id: Optional[str] = None
+
+
+@router.post("/destinations")
+def add_destination(body: MeetingPointRequest, authorization: str = Header(None)):
+    """
+    Leader adds a new destination pin for their group.
+    """
+    user = get_current_user(authorization)
+    if user.get("role") not in ["leader", "admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only group leaders can add destinations")
+
+    point_data = {
+        "group_id": body.group_id,
+        "latitude": body.latitude,
+        "longitude": body.longitude,
+        "label": body.label,
+        "description": body.description,
+        "set_by": user.get("sub"),
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        res = supabase.table("meeting_points").insert(point_data).execute()
+        if res.data:
+            return {
+                "success": True,
+                "message": f"Destination pin '{body.label}' added successfully.",
+                "destination": res.data[0]
+            }
+        raise HTTPException(status_code=500, detail="Failed to add destination pin")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/destinations/{group_id}")
+def get_destinations(group_id: str, authorization: str = Header(None)):
+    """
+    Pilgrims & leaders fetch all destinations + which one is marked next.
+    """
+    get_current_user(authorization)
+
+    try:
+        # Fetch all active meeting/destination points for this group
+        res = supabase.table("meeting_points") \
+            .select("*") \
+            .eq("group_id", group_id) \
+            .eq("is_active", True) \
+            .order("created_at", desc=False) \
+            .execute()
+
+        # Fetch which pin is marked as the next destination from app_settings table
+        next_res = supabase.table("app_settings") \
+            .select("setting_value") \
+            .eq("setting_key", f"next_destination_{group_id}") \
+            .limit(1) \
+            .execute()
+
+        next_id = None
+        if next_res.data:
+            next_id = next_res.data[0].get("setting_value", {}).get("pin_id")
+
+        return {
+            "success": True,
+            "destinations": res.data or [],
+            "next_destination_id": next_id
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/destinations/{pin_id}")
+def delete_destination(pin_id: str, authorization: str = Header(None)):
+    """
+    Leader removes a specific destination pin.
+    """
+    user = get_current_user(authorization)
+    if user.get("role") not in ["leader", "admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only leaders can delete destinations")
+
+    try:
+        supabase.table("meeting_points").delete().eq("id", pin_id).execute()
+        return {"success": True, "message": "Destination deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/destinations/set-next")
+def set_next_destination(body: SetNextRequest, authorization: str = Header(None)):
+    """
+    Leader sets a specific pin as the group's "Next Destination".
+    """
+    user = get_current_user(authorization)
+    if user.get("role") not in ["leader", "admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only leaders can set the next destination")
+
+    try:
+        key = f"next_destination_{body.group_id}"
+        val = {"pin_id": body.pin_id}
+        
+        # Save active pin mapping in app_settings
+        supabase.table("app_settings").upsert({
+            "setting_key": key,
+            "setting_value": val,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }).execute()
+
+        return {"success": True, "message": "Next destination milestone set successfully.", "data": val}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

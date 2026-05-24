@@ -396,3 +396,32 @@ def register_pilgrim(body: PilgrimRegisterRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to register pilgrim: {str(e)}")
 
+
+# ── Update Own Profile (leader phone, etc.) ──────────────────────────────────
+class ProfileUpdateRequest(BaseModel):
+    phone:      str | None = None
+    full_name:  str | None = None
+
+@router.put("/profile")
+def update_profile(body: ProfileUpdateRequest, user=Depends(get_current_user)):
+    """
+    Allows any user (especially leaders) to update their own phone and display name.
+    Pilgrims fetching /auth/me will immediately see the updated leader phone.
+    """
+    patch = {}
+    if body.phone     is not None: patch["phone"]     = body.phone.strip()
+    if body.full_name is not None: patch["full_name"] = body.full_name.strip()
+    if not patch:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    try:
+        res = supabase.table("users_table") \
+            .update(patch) \
+            .eq("id", user["sub"]) \
+            .execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {"success": True, "updated": patch}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
