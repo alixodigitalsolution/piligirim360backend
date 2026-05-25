@@ -3,7 +3,7 @@
 # ============================================================
 from fastapi import APIRouter, Depends, HTTPException
 from config import supabase
-from auth.rbac import require_any_staff, require_leader
+from auth.rbac import require_any_staff, require_leader, get_current_user
 
 router = APIRouter()
 
@@ -52,7 +52,7 @@ def get_all_locations(user=Depends(require_any_staff)):
 @router.get("/group/{group_id}")
 def get_group_locations(
     group_id: str,
-    user=Depends(require_any_staff)
+    user=Depends(get_current_user)
 ):
     """
     Returns latest location for every pilgrim in a group.
@@ -227,7 +227,7 @@ def create_danger_zone(body: DangerZoneRequest, user=Depends(require_any_staff))
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/danger_zones")
-def get_danger_zones(user=Depends(require_any_staff)):
+def get_danger_zones(user=Depends(get_current_user)):
     """Get active danger zones with custom visibility rules."""
     try:
         agency_id = _get_user_agency_id(user)
@@ -251,6 +251,10 @@ def get_danger_zones(user=Depends(require_any_staff)):
         role = user.get("role")
         if role in ("admin", "super_admin"):
             # Admin sees all danger zones
+            return {"success": True, "data": all_zones}
+
+        if role == "pilgrim":
+            # Pilgrims see all danger zones for their agency
             return {"success": True, "data": all_zones}
 
         # For Leaders: visible if created by admin or by leaders sharing same group name
